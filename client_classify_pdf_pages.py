@@ -75,10 +75,7 @@ async def main():
     try:
         handle = await client.start_workflow(
             ClassifyPDFPagesWorkflowAlias.run,
-            organization_id,
-            str(pdf_path),
-            tag_name,
-            prompt_name,
+            args=(organization_id, str(pdf_path), tag_name, prompt_name),
             id=workflow_id,
             task_queue="doc-router-task-queue",
         )

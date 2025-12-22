@@ -37,20 +37,7 @@ class ClassifyPDFPagesWorkflow:
         workflow.logger.info(f"Starting PDF pages classification workflow for organization: {organization_id}")
         workflow.logger.info(f"PDF path: {pdf_path}, tag: {tag_name}, prompt: {prompt_name}")
         
-        # Step 1: Read the PDF file
-        workflow.logger.info("Reading PDF file...")
-        pdf_data = await workflow.execute_activity(
-            "read_pdf_activity",
-            args=(pdf_path,),
-            start_to_close_timeout=timedelta(seconds=60),
-        )
-        
-        # Extract filename from path
-        import os
-        filename = os.path.basename(pdf_path)
-        base_filename = os.path.splitext(filename)[0]
-        
-        # Step 2: Get tag ID from tag name
+        # Step 1: Get tag ID from tag name
         workflow.logger.info(f"Getting tag ID for tag: {tag_name}")
         tag_id = await workflow.execute_activity(
             "get_tag_id_activity",
@@ -61,7 +48,7 @@ class ClassifyPDFPagesWorkflow:
         if not tag_id:
             raise ValueError(f"Tag '{tag_name}' not found")
         
-        # Step 3: Get prompt ID from prompt name
+        # Step 2: Get prompt ID from prompt name
         workflow.logger.info(f"Getting prompt ID for prompt: {prompt_name}")
         prompt_revid = await workflow.execute_activity(
             "get_prompt_id_activity",
@@ -72,41 +59,27 @@ class ClassifyPDFPagesWorkflow:
         if not prompt_revid:
             raise ValueError(f"Prompt '{prompt_name}' not found")
         
-        # Step 4: Chunk PDF into single-page PDFs
-        workflow.logger.info("Chunking PDF into single-page PDFs...")
-        chunks = await workflow.execute_activity(
-            "chunk_pdf_activity",
-            args=(pdf_data, base_filename),
-            start_to_close_timeout=timedelta(seconds=300),  # 5 minutes for large PDFs
+        # Step 3: Read, chunk PDF, and upload each page to docrouter (all in one activity to avoid passing large data)
+        workflow.logger.info("Reading, chunking, and uploading PDF pages...")
+        uploaded_pages = await workflow.execute_activity(
+            "chunk_and_upload_pdf_activity",
+            args=(pdf_path, organization_id, tag_id),
+            start_to_close_timeout=timedelta(seconds=600),  # 10 minutes for large PDFs with uploads
         )
         
-        total_pages = len(chunks)
-        workflow.logger.info(f"PDF chunked into {total_pages} pages")
+        # Extract filename from uploaded pages
+        import os
+        filename = os.path.basename(pdf_path)
+        base_filename = uploaded_pages[0].get("base_filename", os.path.splitext(filename)[0]) if uploaded_pages else os.path.splitext(filename)[0]
         
-        # Step 5: Upload each page and trigger prompt run
-        workflow.logger.info(f"Uploading {total_pages} pages and triggering prompt runs...")
-        upload_tasks = []
-        for chunk in chunks:
-            # Upload document
-            upload_task = workflow.execute_activity(
-                "upload_document_activity",
-                args=(
-                    organization_id,
-                    chunk["filename"],
-                    chunk["page_data"],
-                    [tag_id],
-                ),
-                start_to_close_timeout=timedelta(seconds=120),
-            )
-            upload_tasks.append((chunk["page_number"], upload_task))
+        total_pages = len(uploaded_pages)
+        workflow.logger.info(f"PDF chunked and uploaded into {total_pages} pages")
         
-        # Wait for all uploads to complete
-        upload_results = []
-        for page_number, upload_task in upload_tasks:
-            upload_result = await upload_task
-            upload_results.append((page_number, upload_result))
-        
-        workflow.logger.info("All pages uploaded successfully")
+        # Prepare upload results in the format expected by the rest of the workflow
+        upload_results = [
+            (page["page_number"], {"document_id": page["document_id"]})
+            for page in uploaded_pages
+        ]
         
         # Step 6: Trigger prompt runs for all documents
         workflow.logger.info("Triggering prompt runs for all documents...")

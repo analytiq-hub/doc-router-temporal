@@ -14,8 +14,7 @@ load_dotenv()
 from workflows.list_documents import ListDocumentsWorkflow, ListDocumentsWorkflowAlias
 from workflows.classify_pdf_pages import ClassifyPDFPagesWorkflow, ClassifyPDFPagesWorkflowAlias
 from activities.list_documents import list_documents_activity
-from activities.read_pdf import read_pdf_activity
-from activities.chunk_pdf import chunk_pdf_activity
+from activities.chunk_and_upload_pdf import chunk_and_upload_pdf_activity
 from activities.get_tag_id import get_tag_id_activity
 from activities.get_prompt_id import get_prompt_id_activity
 from activities.upload_document import upload_document_activity
@@ -65,8 +64,7 @@ async def main():
         ],
         activities=[
             list_documents_activity,
-            read_pdf_activity,
-            chunk_pdf_activity,
+            chunk_and_upload_pdf_activity,
             get_tag_id_activity,
             get_prompt_id_activity,
             upload_document_activity,

@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import os
+import uuid
 from dotenv import load_dotenv
 from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 # Load environment variables from .env file
 load_dotenv()
@@ -38,16 +40,23 @@ async def main():
     
     logger.info(f"Starting workflow for organization: {organization_id}")
     
-    # Start the workflow
-    handle = await client.start_workflow(
-        ListDocumentsWorkflowAlias.run,
-        organization_id,
-        id=f"list-documents-{organization_id}",
-        task_queue="doc-router-task-queue",
-    )
+    # Generate a unique workflow ID to avoid conflicts
+    workflow_id = f"list-documents-{organization_id}-{uuid.uuid4().hex[:8]}"
     
-    logger.info(f"Workflow started with ID: {handle.id}")
-    logger.info(f"Workflow run ID: {handle.result_run_id}")
+    # Start the workflow
+    try:
+        handle = await client.start_workflow(
+            ListDocumentsWorkflowAlias.run,
+            organization_id,
+            id=workflow_id,
+            task_queue="doc-router-task-queue",
+        )
+        logger.info(f"Workflow started with ID: {handle.id}")
+        logger.info(f"Workflow run ID: {handle.result_run_id}")
+    except WorkflowAlreadyStartedError as e:
+        logger.warning(f"Workflow already running with ID: {e.id}, getting existing handle...")
+        handle = client.get_workflow_handle(e.id, run_id=e.run_id)
+        logger.info(f"Using existing workflow with ID: {handle.id}")
     
     # Wait for the workflow to complete
     result = await handle.result()

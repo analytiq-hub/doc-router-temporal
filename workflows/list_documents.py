@@ -3,6 +3,7 @@
 from temporalio import workflow
 from typing import List, Dict, Any
 import logging
+from activities.list_documents import list_documents_activity
 
 logger = logging.getLogger(__name__)
 

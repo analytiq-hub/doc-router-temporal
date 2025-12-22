@@ -1,5 +1,6 @@
 """Temporal workflow for listing documents from docrouter."""
 
+from datetime import timedelta
 from temporalio import workflow
 from typing import List, Dict, Any
 
@@ -27,10 +28,8 @@ class ListDocumentsWorkflow:
         # Use string reference to avoid importing activity module in workflow
         result = await workflow.execute_activity(
             "list_documents_activity",
-            organization_id,
-            skip,
-            limit,
-            start_to_close_timeout=60,
+            args=(organization_id, skip, limit),
+            start_to_close_timeout=timedelta(seconds=60),
         )
 
         workflow.logger.info(f"Workflow completed. Found {result.get('total_count', 0)} documents")

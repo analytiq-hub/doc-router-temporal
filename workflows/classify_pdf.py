@@ -1,5 +1,6 @@
 """Temporal workflow for classifying a PDF by splitting it into pages and classifying each."""
 
+from datetime import timedelta
 from temporalio import workflow
 from typing import List, Dict, Any
 
@@ -38,8 +39,8 @@ class ClassifyPDFWorkflow:
         workflow.logger.info("Splitting PDF into pages...")
         pages = await workflow.execute_activity(
             "split_pdf_activity",
-            pdf_data,
-            start_to_close_timeout=300,  # 5 minutes for large PDFs
+            args=(pdf_data,),
+            start_to_close_timeout=timedelta(seconds=300),  # 5 minutes for large PDFs
         )
 
         total_pages = len(pages)
@@ -53,11 +54,13 @@ class ClassifyPDFWorkflow:
         for page_info in pages:
             task = workflow.execute_activity(
                 "classify_page_activity",
-                organization_id,
-                page_info["page_data"],
-                page_info["page_number"],
-                classification_prompt,
-                start_to_close_timeout=120,  # 2 minutes per page
+                args=(
+                    organization_id,
+                    page_info["page_data"],
+                    page_info["page_number"],
+                    classification_prompt,
+                ),
+                start_to_close_timeout=timedelta(seconds=120),  # 2 minutes per page
             )
             classification_tasks.append(task)
         

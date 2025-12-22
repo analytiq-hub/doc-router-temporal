@@ -1,6 +1,7 @@
 """Activity to trigger a prompt run on a document."""
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 from typing import Dict, Any
 import logging
 
@@ -56,14 +57,14 @@ async def run_prompt_activity(
             
     except httpx.RequestError as e:
         logger.error(f"Error calling docrouter API: {e}")
-        raise activity.ApplicationError(
+        raise ApplicationError(
             f"Failed to run prompt: {str(e)}",
             type="DocRouterAPIError",
             non_retryable=False
         )
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error from docrouter API: {e.response.status_code} - {e.response.text}")
-        raise activity.ApplicationError(
+        raise ApplicationError(
             f"HTTP error from docrouter API: {e.response.status_code}",
             type="DocRouterAPIError",
             non_retryable=False

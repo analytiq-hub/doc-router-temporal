@@ -67,10 +67,16 @@ class ClassifyPDFPagesWorkflow:
             start_to_close_timeout=timedelta(seconds=600),  # 10 minutes for large PDFs with uploads
         )
         
-        # Extract filename from uploaded pages
-        import os
-        filename = os.path.basename(pdf_path)
-        base_filename = uploaded_pages[0].get("base_filename", os.path.splitext(filename)[0]) if uploaded_pages else os.path.splitext(filename)[0]
+        # Extract filename from uploaded pages (activity already provides base_filename)
+        # Use simple string operations instead of os.path to avoid sandbox restrictions
+        if uploaded_pages:
+            base_filename = uploaded_pages[0].get("base_filename", "")
+            # Extract filename from path using string operations (no os.path)
+            filename = pdf_path.split("/")[-1] if "/" in pdf_path else pdf_path.split("\\")[-1] if "\\" in pdf_path else pdf_path
+        else:
+            # Fallback: extract filename from path using string operations
+            filename = pdf_path.split("/")[-1] if "/" in pdf_path else pdf_path.split("\\")[-1] if "\\" in pdf_path else pdf_path
+            base_filename = filename.rsplit(".", 1)[0] if "." in filename else filename
         
         total_pages = len(uploaded_pages)
         workflow.logger.info(f"PDF chunked and uploaded into {total_pages} pages")

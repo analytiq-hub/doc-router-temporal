@@ -27,7 +27,7 @@ async def list_documents_activity(
         Dictionary containing documents list and metadata
     """
     base_url = os.getenv("DOCROUTER_BASE_URL", "http://localhost:8000")
-    api_token = os.getenv("DOCROUTER_API_TOKEN")
+    api_token = os.getenv("DOCROUTER_ORG_API_TOKEN")
     
     url = f"{base_url}/v0/orgs/{organization_id}/documents"
     params = {

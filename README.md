@@ -41,7 +41,7 @@ cp env.example .env
 Required environment variables:
 - `DOCROUTER_BASE_URL`: Base URL of the docrouter FastAPI service (e.g., `http://localhost:8000`)
 - `DOCROUTER_ORG_ID`: The organization/workspace ID to list documents from
-- `DOCROUTER_API_TOKEN`: API token for authentication
+- `DOCROUTER_ORG_API_TOKEN`: API token for authentication
 - `TEMPORAL_HOST`: Temporal server host (default: `10.83.8.98`)
 - `TEMPORAL_PORT`: Temporal server port (default: `7233`)
 - `TEMPORAL_NAMESPACE`: Temporal namespace (default: `default`)
@@ -114,7 +114,7 @@ The default configuration connects to Temporal at `10.83.8.98:7233` with the `de
 
 The activity connects to the docrouter FastAPI service. Ensure:
 - The service is accessible at the configured `DOCROUTER_BASE_URL`
-- You have a valid `DOCROUTER_API_TOKEN`
+- You have a valid `DOCROUTER_ORG_API_TOKEN`
 - The organization ID exists and you have access to it
 
 ## Development

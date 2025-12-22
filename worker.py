@@ -12,7 +12,16 @@ from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxR
 load_dotenv()
 
 from workflows.list_documents import ListDocumentsWorkflow, ListDocumentsWorkflowAlias
+from workflows.classify_pdf_pages import ClassifyPDFPagesWorkflow, ClassifyPDFPagesWorkflowAlias
 from activities.list_documents import list_documents_activity
+from activities.read_pdf import read_pdf_activity
+from activities.chunk_pdf import chunk_pdf_activity
+from activities.get_tag_id import get_tag_id_activity
+from activities.get_prompt_id import get_prompt_id_activity
+from activities.upload_document import upload_document_activity
+from activities.run_prompt import run_prompt_activity
+from activities.wait_for_prompt import wait_for_prompt_activity
+from activities.get_classification_result import get_classification_result_activity
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -44,12 +53,27 @@ async def main():
         "linecache",
     )
 
-    # Create a worker that knows about our workflow and activity
+    # Create a worker that knows about our workflows and activities
     worker = Worker(
         client,
         task_queue="doc-router-task-queue",
-        workflows=[ListDocumentsWorkflow, ListDocumentsWorkflowAlias],
-        activities=[list_documents_activity],
+        workflows=[
+            ListDocumentsWorkflow,
+            ListDocumentsWorkflowAlias,
+            ClassifyPDFPagesWorkflow,
+            ClassifyPDFPagesWorkflowAlias,
+        ],
+        activities=[
+            list_documents_activity,
+            read_pdf_activity,
+            chunk_pdf_activity,
+            get_tag_id_activity,
+            get_prompt_id_activity,
+            upload_document_activity,
+            run_prompt_activity,
+            wait_for_prompt_activity,
+            get_classification_result_activity,
+        ],
         workflow_runner=SandboxedWorkflowRunner(restrictions=sandbox_restrictions),
     )
     

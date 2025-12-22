@@ -2,11 +2,6 @@
 
 from temporalio import workflow
 from typing import List, Dict, Any
-import logging
-from activities.split_pdf import split_pdf_activity
-from activities.classify_page import classify_page_activity
-
-logger = logging.getLogger(__name__)
 
 
 @workflow.defn
@@ -36,28 +31,28 @@ class ClassifyPDFWorkflow:
             - classifications: List of classification results for each page
             - summary: Summary statistics
         """
-        logger.info(f"Starting PDF classification workflow for organization: {organization_id}")
-        logger.info(f"PDF size: {len(pdf_data)} bytes")
-        
+        workflow.logger.info(f"Starting PDF classification workflow for organization: {organization_id}")
+        workflow.logger.info(f"PDF size: {len(pdf_data)} bytes")
+
         # Step 1: Split PDF into pages
-        logger.info("Splitting PDF into pages...")
+        workflow.logger.info("Splitting PDF into pages...")
         pages = await workflow.execute_activity(
-            split_pdf_activity,
+            "split_pdf_activity",
             pdf_data,
             start_to_close_timeout=300,  # 5 minutes for large PDFs
         )
-        
+
         total_pages = len(pages)
-        logger.info(f"PDF split into {total_pages} pages")
-        
+        workflow.logger.info(f"PDF split into {total_pages} pages")
+
         # Step 2: Classify each page in parallel (with concurrency limit)
-        logger.info(f"Classifying {total_pages} pages (max {max_concurrent_classifications} concurrent)...")
+        workflow.logger.info(f"Classifying {total_pages} pages (max {max_concurrent_classifications} concurrent)...")
         
         # Create tasks for all pages
         classification_tasks = []
         for page_info in pages:
             task = workflow.execute_activity(
-                classify_page_activity,
+                "classify_page_activity",
                 organization_id,
                 page_info["page_data"],
                 page_info["page_number"],
@@ -73,13 +68,13 @@ class ClassifyPDFWorkflow:
             batch = classification_tasks[i:i + max_concurrent_classifications]
             batch_results = await workflow.gather(*batch)
             all_results.extend(batch_results)
-            logger.info(f"Completed classification batch {i // max_concurrent_classifications + 1}")
-        
+            workflow.logger.info(f"Completed classification batch {i // max_concurrent_classifications + 1}")
+
         # Sort results by page number to ensure consistent ordering
         all_results.sort(key=lambda x: x["page_number"])
-        
+
         # Step 3: Aggregate results
-        logger.info(f"All {total_pages} pages classified successfully")
+        workflow.logger.info(f"All {total_pages} pages classified successfully")
         
         result = {
             "total_pages": total_pages,
@@ -89,8 +84,8 @@ class ClassifyPDFWorkflow:
                 "organization_id": organization_id
             }
         }
-        
-        logger.info("PDF classification workflow completed")
+
+        workflow.logger.info("PDF classification workflow completed")
         return result
 
 

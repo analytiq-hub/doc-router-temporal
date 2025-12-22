@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,13 +35,22 @@ async def main():
     )
     
     logger.info(f"Connected to Temporal namespace: {temporal_namespace}")
-    
+
+    # Configure sandbox with passthrough for standard library modules
+    # This is needed to avoid sandbox restrictions on logging and traceback modules
+    sandbox_restrictions = SandboxRestrictions.default.with_passthrough_modules(
+        "logging",
+        "traceback",
+        "linecache",
+    )
+
     # Create a worker that knows about our workflow and activity
     worker = Worker(
         client,
         task_queue="doc-router-task-queue",
         workflows=[ListDocumentsWorkflow, ListDocumentsWorkflowAlias],
         activities=[list_documents_activity],
+        workflow_runner=SandboxedWorkflowRunner(restrictions=sandbox_restrictions),
     )
     
     logger.info("Starting worker on task queue: doc-router-task-queue")

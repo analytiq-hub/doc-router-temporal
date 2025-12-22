@@ -18,10 +18,10 @@ async def main():
     temporal_host = os.getenv("TEMPORAL_HOST", "10.83.8.98")
     temporal_port = int(os.getenv("TEMPORAL_PORT", "7233"))
     temporal_namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
-    organization_id = os.getenv("ORGANIZATION_ID")
+    organization_id = os.getenv("DOCROUTER_ORG_ID")
     
     if not organization_id:
-        logger.error("ORGANIZATION_ID environment variable is required")
+        logger.error("DOCROUTER_ORG_ID environment variable is required")
         return
     
     logger.info(f"Connecting to Temporal at {temporal_host}:{temporal_port}")

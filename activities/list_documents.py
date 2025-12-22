@@ -2,8 +2,6 @@
 
 from temporalio import activity
 from typing import Dict, Any
-import httpx
-import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,6 +24,9 @@ async def list_documents_activity(
     Returns:
         Dictionary containing documents list and metadata
     """
+    # Import os inside the function to avoid determinism issues in workflows
+    import os
+    
     base_url = os.getenv("DOCROUTER_BASE_URL", "http://localhost:8000")
     api_token = os.getenv("DOCROUTER_ORG_API_TOKEN")
     
@@ -40,6 +41,9 @@ async def list_documents_activity(
         headers["Authorization"] = f"Bearer {api_token}"
     
     logger.info(f"Calling docrouter API: {url} with params: {params}")
+    
+    # Import httpx inside the function to avoid determinism issues in workflows
+    import httpx
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

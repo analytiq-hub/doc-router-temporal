@@ -3,8 +3,12 @@
 import asyncio
 import logging
 import os
+from dotenv import load_dotenv
 from temporalio.client import Client
 from temporalio.worker import Worker
+
+# Load environment variables from .env file
+load_dotenv()
 
 from workflows.list_documents import ListDocumentsWorkflow, ListDocumentsWorkflowAlias
 from activities.list_documents import list_documents_activity

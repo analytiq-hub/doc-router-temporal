@@ -1,7 +1,6 @@
 """Activity to read a PDF file from disk."""
 
 from temporalio import activity
-from typing import bytes
 import logging
 
 logger = logging.getLogger(__name__)

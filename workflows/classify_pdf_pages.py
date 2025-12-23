@@ -18,7 +18,8 @@ class ClassifyPDFPagesWorkflow:
         organization_id: str,
         pdf_path: str,
         tag_name: str = "anesthesia_bundle_page_classifier",
-        prompt_name: str = "anesthesia_bundle_page_classifier"
+        prompt_name: str = "anesthesia_bundle_page_classifier",
+        max_retries: int = 2
     ) -> Dict[str, Any]:
         """
         Execute the workflow to classify PDF pages.
@@ -28,6 +29,7 @@ class ClassifyPDFPagesWorkflow:
             pdf_path: Path to the PDF file
             tag_name: Name of the tag to use (default: "anesthesia_bundle_page_classifier")
             prompt_name: Name of the prompt to use (default: "anesthesia_bundle_page_classifier")
+            max_retries: Maximum number of retries for failed documents (default: 2)
             
         Returns:
             Dictionary containing:
@@ -35,7 +37,7 @@ class ClassifyPDFPagesWorkflow:
             - pages: Array of page classification results
         """
         workflow.logger.info(f"Starting PDF pages classification workflow for organization: {organization_id}")
-        workflow.logger.info(f"PDF path: {pdf_path}, tag: {tag_name}, prompt: {prompt_name}")
+        workflow.logger.info(f"PDF path: {pdf_path}, tag: {tag_name}, prompt: {prompt_name}, max_retries: {max_retries}")
         
         # Step 1: Get tag ID from tag name
         workflow.logger.info(f"Getting tag ID for tag: {tag_name}")
@@ -87,53 +89,105 @@ class ClassifyPDFPagesWorkflow:
             for page in uploaded_pages
         ]
         
-        # Step 6: Trigger prompt runs for all documents
-        workflow.logger.info("Triggering prompt runs for all documents...")
-        run_tasks = []
+        # Step 6: Poll document status until all documents reach a completed state
+        workflow.logger.info("Polling document status until all documents are completed...")
+        poll_tasks = []
         for page_number, upload_result in upload_results:
             document_id = upload_result["document_id"]
-            run_task = workflow.execute_activity(
-                "run_prompt_activity",
+            poll_task = workflow.execute_activity(
+                "poll_document_status_activity",
                 args=(
                     organization_id,
                     document_id,
-                    prompt_revid,
-                    False,  # force=False
-                ),
-                start_to_close_timeout=timedelta(seconds=60),
-            )
-            run_tasks.append((page_number, document_id, run_task))
-        
-        # Wait for all prompt runs to be triggered
-        for page_number, document_id, run_task in run_tasks:
-            await run_task
-        
-        workflow.logger.info("All prompt runs triggered")
-        
-        # Step 7: Wait for all prompts to complete and retrieve results
-        workflow.logger.info("Waiting for all prompts to complete...")
-        classification_tasks = []
-        for page_number, document_id, _ in run_tasks:
-            # First wait for completion
-            wait_task = workflow.execute_activity(
-                "wait_for_prompt_activity",
-                args=(
-                    organization_id,
-                    document_id,
-                    prompt_revid,
                     600,  # max_wait_seconds: 10 minutes
                     5,    # poll_interval_seconds: 5 seconds
+                    prompt_revid,  # For retries if needed
                 ),
                 start_to_close_timeout=timedelta(seconds=630),  # Slightly more than max_wait
             )
-            classification_tasks.append((page_number, document_id, wait_task))
+            poll_tasks.append((page_number, document_id, poll_task))
         
-        # Wait for all prompts to complete
+        # Wait for all documents to complete (with retry handling for failures)
+        completed_documents = []
+        failed_documents = []
+        
+        for page_number, document_id, poll_task in poll_tasks:
+            poll_result = await poll_task
+            if poll_result["status"] == "completed":
+                completed_documents.append((page_number, document_id))
+            elif poll_result["status"] == "failed":
+                failed_state = poll_result.get("state", "")
+                failed_documents.append((page_number, document_id, failed_state))
+        
+        workflow.logger.info(f"Polling completed: {len(completed_documents)} completed, {len(failed_documents)} failed")
+        
+        # Step 7: Retry failed documents (with configurable max retries)
+        retry_attempt = 0
+        while failed_documents and retry_attempt < max_retries:
+            retry_attempt += 1
+            workflow.logger.info(f"Retry attempt {retry_attempt}/{max_retries} for {len(failed_documents)} failed documents...")
+            
+            retry_tasks = []
+            for page_number, document_id, failed_state in failed_documents:
+                # Retry both OCR and LLM failures
+                retry_task = workflow.execute_activity(
+                    "retry_failed_document_activity",
+                    args=(
+                        organization_id,
+                        document_id,
+                        prompt_revid,
+                        failed_state,
+                    ),
+                    start_to_close_timeout=timedelta(seconds=60),
+                )
+                retry_tasks.append((page_number, document_id, failed_state, retry_task))
+            
+            # Wait for retries to be triggered, then poll again
+            still_failed = []
+            for page_number, document_id, failed_state, retry_task in retry_tasks:
+                try:
+                    retry_result = await retry_task
+                    # Poll again after retry (for both LLM retries and OCR wait-and-check)
+                    if retry_result.get("status") in ["retry_triggered", "wait_and_check"]:
+                        poll_result = await workflow.execute_activity(
+                            "poll_document_status_activity",
+                            args=(
+                                organization_id,
+                                document_id,
+                                600,  # max_wait_seconds: 10 minutes
+                                5,    # poll_interval_seconds: 5 seconds
+                                prompt_revid,
+                            ),
+                            start_to_close_timeout=timedelta(seconds=630),
+                        )
+                        if poll_result["status"] == "completed":
+                            completed_documents.append((page_number, document_id))
+                            workflow.logger.info(f"Document {document_id} completed after retry attempt {retry_attempt}")
+                        else:
+                            # Still failed, add to list for next retry attempt
+                            new_failed_state = poll_result.get("state", failed_state)
+                            still_failed.append((page_number, document_id, new_failed_state))
+                            workflow.logger.warning(f"Document {document_id} still failed after retry attempt {retry_attempt}: {new_failed_state}")
+                    else:
+                        # Could not retry, add to still_failed list
+                        still_failed.append((page_number, document_id, failed_state))
+                        workflow.logger.warning(f"Could not retry document {document_id}: {retry_result.get('reason', 'unknown')}")
+                except Exception as e:
+                    # Exception during retry, add to still_failed list
+                    still_failed.append((page_number, document_id, failed_state))
+                    workflow.logger.warning(f"Retry attempt {retry_attempt} failed for page {page_number}, document {document_id}: {e}")
+            
+            # Update failed_documents for next iteration
+            failed_documents = still_failed
+        
+        if failed_documents:
+            workflow.logger.warning(f"After {max_retries} retry attempts, {len(failed_documents)} documents still failed")
+        
+        # Step 8: Retrieve classification results for all completed documents
+        workflow.logger.info("Retrieving classification results...")
         page_results = []
-        for page_number, document_id, wait_task in classification_tasks:
-            wait_result = await wait_task
-            if wait_result["status"] == "completed":
-                # Get the classification result
+        for page_number, document_id in completed_documents:
+            try:
                 result = await workflow.execute_activity(
                     "get_classification_result_activity",
                     args=(
@@ -149,8 +203,17 @@ class ClassifyPDFPagesWorkflow:
                     "page_num": page_number,
                     prompt_name: classification_data
                 })
-            else:
-                workflow.logger.warning(f"Prompt timeout for page {page_number}, document {document_id}")
+            except Exception as e:
+                workflow.logger.warning(f"Failed to get classification result for page {page_number}, document {document_id}: {e}")
+                page_results.append({
+                    "page_num": page_number,
+                    prompt_name: {}
+                })
+        
+        # Add empty results for any documents that didn't complete
+        completed_page_numbers = {page_num for page_num, _ in completed_documents}
+        for page_number, document_id, _ in failed_documents:
+            if page_number not in completed_page_numbers:
                 page_results.append({
                     "page_num": page_number,
                     prompt_name: {}
@@ -179,9 +242,10 @@ class ClassifyPDFPagesWorkflowAlias:
         organization_id: str,
         pdf_path: str,
         tag_name: str = "anesthesia_bundle_page_classifier",
-        prompt_name: str = "anesthesia_bundle_page_classifier"
+        prompt_name: str = "anesthesia_bundle_page_classifier",
+        max_retries: int = 2
     ) -> Dict[str, Any]:
         """Execute the workflow to classify PDF pages."""
         workflow_instance = ClassifyPDFPagesWorkflow()
-        return await workflow_instance.run(organization_id, pdf_path, tag_name, prompt_name)
+        return await workflow_instance.run(organization_id, pdf_path, tag_name, prompt_name, max_retries)
 

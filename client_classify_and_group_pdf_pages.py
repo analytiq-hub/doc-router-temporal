@@ -1,4 +1,4 @@
-"""Client script to start the PDF pages classification workflow."""
+"""Client script to start the PDF pages classification and grouping workflow."""
 
 import asyncio
 import logging
@@ -14,7 +14,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 # Load environment variables from .env file
 load_dotenv()
 
-from workflows.classify_pdf_pages import ClassifyPDFPagesWorkflowAlias
+from workflows.classify_and_group_pdf_pages import ClassifyAndGroupPDFPagesWorkflowAlias
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    """Main function to start the PDF pages classification workflow."""
+    """Main function to start the PDF pages classification and grouping workflow."""
     # Get configuration from environment
     temporal_host = os.getenv("TEMPORAL_HOST", "10.83.8.98")
     temporal_port = int(os.getenv("TEMPORAL_PORT", "7233"))
@@ -36,10 +36,10 @@ async def main():
         pdf_path = os.getenv("TEST_PDF")
     
     if not pdf_path:
-        logger.error("Usage: python client_classify_pdf_pages.py <pdf_file_path> [tag_name] [prompt_name] [max_retries]")
+        logger.error("Usage: python client_classify_and_group_pdf_pages.py <pdf_file_path> [tag_name] [prompt_name] [max_retries]")
         logger.error("Or set TEST_PDF environment variable")
-        logger.error("Example: python client_classify_pdf_pages.py document.pdf")
-        logger.error("Example: python client_classify_pdf_pages.py document.pdf anesthesia_bundle_page_classifier anesthesia_bundle_page_classifier 3")
+        logger.error("Example: python client_classify_and_group_pdf_pages.py document.pdf")
+        logger.error("Example: python client_classify_and_group_pdf_pages.py document.pdf anesthesia_bundle_page_classifier anesthesia_bundle_page_classifier 3")
         return
     
     pdf_path = Path(pdf_path)
@@ -69,15 +69,15 @@ async def main():
         namespace=temporal_namespace,
     )
     
-    logger.info(f"Starting PDF pages classification workflow for organization: {organization_id}")
+    logger.info(f"Starting PDF pages classification and grouping workflow for organization: {organization_id}")
     
     # Generate a unique workflow ID
-    workflow_id = f"classify-pdf-pages-{organization_id}-{uuid.uuid4().hex[:8]}"
+    workflow_id = f"classify-and-group-pdf-pages-{organization_id}-{uuid.uuid4().hex[:8]}"
     
     # Start the workflow
     try:
         handle = await client.start_workflow(
-            ClassifyPDFPagesWorkflowAlias.run,
+            ClassifyAndGroupPDFPagesWorkflowAlias.run,
             args=(organization_id, str(pdf_path), tag_name, prompt_name, max_retries),
             id=workflow_id,
             task_queue="doc-router-task-queue",
@@ -94,18 +94,18 @@ async def main():
     result = await handle.result()
     
     logger.info("Workflow completed!")
-    logger.info(f"File name: {result.get('file_name', 'Unknown')}")
-    logger.info(f"Pages processed: {len(result.get('pages', []))}")
+    logger.info(f"Surgery schedule pages: {len(result.get('surgery_schedule', []))}")
+    logger.info(f"Patients found: {len(result.get('patients', {}))}")
     
     # Display results as JSON
     print("\n" + "="*80)
-    print("CLASSIFICATION RESULTS (JSON)")
+    print("GROUPED CLASSIFICATION RESULTS (JSON)")
     print("="*80)
     print(json.dumps(result, indent=2, default=str))
     print("="*80)
     
     # Also save to file
-    output_file = pdf_path.stem + "_classification_results.json"
+    output_file = pdf_path.stem + "_grouped_results.json"
     with open(output_file, "w") as f:
         json.dump(result, f, indent=2, default=str)
     logger.info(f"Results saved to: {output_file}")

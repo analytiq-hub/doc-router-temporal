@@ -63,7 +63,7 @@ async def get_classification_result_activity(
             non_retryable=False
         )
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error from docrouter API: {e.response.status_code} - {e.response.text}")
+        logger.error(f"HTTP error from docrouter API: {e.response.status_code} - URL: {url} - {e.response.text}")
         raise activity.ApplicationError(
             f"HTTP error from docrouter API: {e.response.status_code}",
             type="DocRouterAPIError",

@@ -19,8 +19,9 @@ from activities.chunk_and_upload_pdf import chunk_and_upload_pdf_activity
 from activities.get_tag_id import get_tag_id_activity
 from activities.get_prompt_id import get_prompt_id_activity
 from activities.upload_document import upload_document_activity
-from activities.run_prompt import run_prompt_activity
-from activities.wait_for_prompt import wait_for_prompt_activity
+from activities.poll_document_status import poll_document_status_activity
+from activities.get_document_status import get_document_status_activity
+from activities.retry_failed_document import retry_failed_document_activity
 from activities.get_classification_result import get_classification_result_activity
 from activities.group_classification_results import group_classification_results_activity
 
@@ -72,8 +73,9 @@ async def main():
             get_tag_id_activity,
             get_prompt_id_activity,
             upload_document_activity,
-            run_prompt_activity,
-            wait_for_prompt_activity,
+            poll_document_status_activity,
+            get_document_status_activity,
+            retry_failed_document_activity,
             get_classification_result_activity,
             group_classification_results_activity,
         ],

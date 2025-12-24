@@ -102,7 +102,9 @@ class ClassifyPDFPagesWorkflow:
                     600,  # max_wait_seconds: 10 minutes
                     5,    # poll_interval_seconds: 5 seconds
                     prompt_revid,  # For retries if needed
+                    page_number,  # Page number for UI display
                 ),
+                activity_id=f"poll_document_status_page_{page_number}",
                 start_to_close_timeout=timedelta(seconds=630),  # Slightly more than max_wait
             )
             poll_tasks.append((page_number, document_id, poll_task))
@@ -157,7 +159,9 @@ class ClassifyPDFPagesWorkflow:
                                 600,  # max_wait_seconds: 10 minutes
                                 5,    # poll_interval_seconds: 5 seconds
                                 prompt_revid,
+                                page_number,  # Page number for UI display
                             ),
+                            activity_id=f"poll_document_status_page_{page_number}_retry_{retry_attempt}",
                             start_to_close_timeout=timedelta(seconds=630),
                         )
                         if poll_result["status"] == "completed":
@@ -194,7 +198,9 @@ class ClassifyPDFPagesWorkflow:
                         organization_id,
                         document_id,
                         prompt_revid,
+                        page_number,  # Page number for UI display
                     ),
+                    activity_id=f"get_classification_result_page_{page_number}",
                     start_to_close_timeout=timedelta(seconds=30),
                 )
                 # Extract the classification result (updated_llm_result contains the JSON)

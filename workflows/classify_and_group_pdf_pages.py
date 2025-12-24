@@ -63,7 +63,15 @@ class ClassifyAndGroupPDFPagesWorkflow:
         
         workflow.logger.info(f"Grouping completed: {len(grouped_results.get('surgery_schedule', []))} surgery schedule pages, {len(grouped_results.get('patients', {}))} patients")
         
-        return grouped_results
+        # Return both classification results and grouped results
+        result = {
+            "file_name": classification_results.get("file_name", ""),
+            "pages": classification_results.get("pages", []),
+            "schedule": grouped_results.get("surgery_schedule", []),
+            "patients": grouped_results.get("patients", {})
+        }
+        
+        return result
 
 
 @workflow.defn(name="classify-and-group-pdf-pages")

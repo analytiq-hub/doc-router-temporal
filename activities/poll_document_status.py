@@ -30,7 +30,8 @@ async def poll_document_status_activity(
     document_id: str,
     max_wait_seconds: int = 600,
     poll_interval_seconds: int = 5,
-    prompt_revid: str = None
+    prompt_revid: str = None,
+    page_number: int = None
 ) -> Dict[str, Any]:
     """
     Poll document status until it reaches a completed state.
@@ -40,6 +41,8 @@ async def poll_document_status_activity(
         document_id: The document ID
         max_wait_seconds: Maximum time to wait in seconds (default: 600 = 10 minutes)
         poll_interval_seconds: Interval between polls in seconds (default: 5)
+        prompt_revid: The prompt revision ID (optional)
+        page_number: The page number for this document (optional, for UI display)
         
     Returns:
         Dictionary containing:

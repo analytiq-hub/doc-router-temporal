@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 async def get_classification_result_activity(
     organization_id: str,
     document_id: str,
-    prompt_revid: str
+    prompt_revid: str,
+    page_number: int = None
 ) -> Optional[Dict[str, Any]]:
     """
     Retrieve classification result from docrouter.
@@ -20,6 +21,7 @@ async def get_classification_result_activity(
         organization_id: The organization/workspace ID
         document_id: The document ID
         prompt_revid: The prompt revision ID
+        page_number: The page number for this document (optional, for UI display)
         
     Returns:
         Dictionary containing the LLM result, or None if not found

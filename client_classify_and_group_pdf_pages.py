@@ -94,20 +94,46 @@ async def main():
     result = await handle.result()
     
     logger.info("Workflow completed!")
-    logger.info(f"Surgery schedule pages: {len(result.get('surgery_schedule', []))}")
-    logger.info(f"Patients found: {len(result.get('patients', {}))}")
+    
+    # Format the results with page ranges and classification information
+    pages = result.get("pages", [])
+    schedule_pages = result.get("schedule", [])
+    patients = result.get("patients", {})
+    
+    # Format patients with page numbers
+    formatted_patients = {}
+    for patient_key, page_numbers in patients.items():
+        formatted_patients[patient_key] = {
+            "pages": sorted(page_numbers)
+        }
+    
+    # Format schedule with page numbers
+    formatted_schedule = {
+        "pages": sorted(schedule_pages)
+    }
+    
+    # Build the formatted result
+    formatted_result = {
+        "file_name": result.get("file_name", ""),
+        "patients": formatted_patients,
+        "schedule": formatted_schedule,
+        "pages": pages
+    }
+    
+    logger.info(f"Surgery schedule pages: {len(schedule_pages)}")
+    logger.info(f"Patients found: {len(patients)}")
     
     # Display results as JSON
     print("\n" + "="*80)
-    print("GROUPED CLASSIFICATION RESULTS (JSON)")
+    print("CLASSIFICATION RESULTS WITH PAGE RANGES (JSON)")
     print("="*80)
-    print(json.dumps(result, indent=2, default=str))
+    print(json.dumps(formatted_result, indent=2, default=str))
     print("="*80)
     
     # Also save to file
     output_file = pdf_path.stem + "_grouped_results.json"
     with open(output_file, "w") as f:
-        json.dump(result, f, indent=2, default=str)
+        json.dump(formatted_result, f, indent=2, default=str)
     logger.info(f"Results saved to: {output_file}")
 
 

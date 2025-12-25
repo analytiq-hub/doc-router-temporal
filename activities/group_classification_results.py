@@ -201,6 +201,83 @@ async def group_classification_results_activity(
                 patients[patient_key]["pages"].append(page_num)
                 logger.debug(f"Page {page_num} assigned to new patient without DOB: {patient_key}")
     
+    # Third pass: Fuzzy matching - merge standalone patients with similar names (up to 2 letter difference)
+    def levenshtein_distance(s1, s2):
+        """Calculate Levenshtein distance between two strings."""
+        if len(s1) < len(s2):
+            return levenshtein_distance(s2, s1)
+        if len(s2) == 0:
+            return len(s1)
+        
+        previous_row = list(range(len(s2) + 1))
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+        return previous_row[-1]
+    
+    def extract_name_string(patient_key):
+        """Extract name portion from patient key (format: first_last or first_last_dob).
+        Returns the name part without DOB as a single string.
+        DOB format is YYYY_MM_DD, so:
+        - first_last_YYYY_MM_DD (5 parts) -> name is first 2 parts
+        - first_YYYY_MM_DD (4 parts) -> name is first 1 part
+        - first_last (2 parts) -> name is all parts
+        - first (1 part) -> name is all parts"""
+        parts = patient_key.split("_")
+        # Check if last 3 parts look like a date (YYYY, MM, DD - all numeric)
+        if len(parts) >= 4:
+            last_three = parts[-3:]
+            if all(part.isdigit() for part in last_three) and len(last_three[0]) == 4:  # YYYY format
+                # Has DOB - return name parts (everything except last 3)
+                return "_".join(parts[:-3])
+        # No DOB - return all parts as name
+        return "_".join(parts)
+    
+    logger.info("Third pass: Fuzzy matching standalone patients with similar names...")
+    patients_to_remove = []
+    
+    # Find standalone patients (only 1 page) and compare with others
+    for standalone_key, standalone_data in patients.items():
+        if len(standalone_data["pages"]) != 1:
+            continue  # Only process standalone patients
+        
+        standalone_name = extract_name_string(standalone_key).lower()
+        best_match = None
+        best_distance = float('inf')
+        
+        # Compare with all other patients
+        for other_key, other_data in patients.items():
+            if other_key == standalone_key:
+                continue
+            
+            other_name = extract_name_string(other_key).lower()
+            
+            # Calculate Levenshtein distance between the full name strings (case-insensitive)
+            distance = levenshtein_distance(standalone_name, other_name)
+            
+            # Only consider if distance <= 2
+            if distance <= 2 and distance < best_distance:
+                best_distance = distance
+                best_match = other_key
+        
+        # If we found a match, merge the standalone patient into the matched patient
+        if best_match:
+            logger.info(f"Merging standalone patient '{standalone_key}' (name: '{standalone_name}', distance: {best_distance}) into '{best_match}' (name: '{extract_name_string(best_match)}')")
+            patients[best_match]["pages"].extend(standalone_data["pages"])
+            patients_to_remove.append(standalone_key)
+    
+    # Remove merged patients
+    for key_to_remove in patients_to_remove:
+        del patients[key_to_remove]
+        logger.debug(f"Removed merged patient: {key_to_remove}")
+    
+    logger.info(f"Fuzzy matching completed: merged {len(patients_to_remove)} standalone patients")
+    
     # Sort page numbers in all lists
     surgery_schedule_pages.sort()
     for patient_key in patients:

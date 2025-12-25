@@ -84,12 +84,13 @@ class ClassifyGroupAndExtractInsuranceWorkflow:
             # Return results without insurance card data
             return grouped_results
         
-        # Step 3: Process each patient - create PDF, upload, wait, and retrieve insurance card
+        # Step 3: Create and upload PDFs for all patients
         patients = grouped_results.get("patients", {})
+        patient_document_map = {}  # Maps patient_key -> document_id
         patients_with_insurance = {}
         
+        workflow.logger.info(f"Step 3a: Creating and uploading PDFs for {len(patients)} patients...")
         for patient_key, patient_data in patients.items():
-            workflow.logger.info(f"Processing patient: {patient_key}")
             page_numbers = patient_data.get("pages", [])
             
             if not page_numbers:
@@ -107,16 +108,28 @@ class ClassifyGroupAndExtractInsuranceWorkflow:
             )
             
             document_id = upload_result.get("document_id")
+            patient_document_map[patient_key] = document_id
             workflow.logger.info(f"Patient PDF created and uploaded with document ID: {document_id}")
+        
+        workflow.logger.info(f"Step 3b: Waiting for {len(patient_document_map)} documents to reach llm_completed state...")
+        # Step 4: Wait for all documents to reach llm_completed state
+        max_wait_seconds = 600  # 10 minutes total
+        poll_interval_seconds = 5  # Poll every 5 seconds
+        max_polls = max_wait_seconds // poll_interval_seconds  # 120 polls
+        
+        document_status_map = {}  # Maps patient_key -> state (tracks final state for all documents)
+        
+        for poll_num in range(max_polls):
+            # Check status for all documents that haven't reached a final state
+            pending_documents = {k: v for k, v in patient_document_map.items() if k not in document_status_map}
             
-            # Wait for document to reach llm_completed state
-            workflow.logger.info(f"Waiting for document {document_id} to reach llm_completed state...")
-            max_wait_seconds = 600  # 10 minutes total
-            poll_interval_seconds = 5  # Poll every 5 seconds
-            max_polls = max_wait_seconds // poll_interval_seconds  # 120 polls
-            reached_llm_completed = False
+            if not pending_documents:
+                workflow.logger.info("All documents have reached a final state")
+                break
             
-            for poll_num in range(max_polls):
+            workflow.logger.debug(f"Poll {poll_num + 1}/{max_polls}: Checking status of {len(pending_documents)} documents...")
+            
+            for patient_key, document_id in pending_documents.items():
                 status_result = await workflow.execute_activity(
                     "get_document_status_activity",
                     args=(organization_id, document_id),
@@ -124,53 +137,63 @@ class ClassifyGroupAndExtractInsuranceWorkflow:
                 )
                 
                 if not status_result:
-                    workflow.logger.warning(f"Document {document_id} not found")
-                    break
+                    workflow.logger.warning(f"Document {document_id} for patient {patient_key} not found")
+                    document_status_map[patient_key] = "not_found"
+                    continue
                 
                 state = status_result.get("state", "")
                 
                 if state == "llm_completed":
-                    workflow.logger.info(f"Document {document_id} reached llm_completed state")
-                    reached_llm_completed = True
-                    break
+                    workflow.logger.info(f"Document {document_id} for patient {patient_key} reached llm_completed state")
+                    document_status_map[patient_key] = state
                 elif state in ["llm_failed", "ocr_failed"]:
-                    workflow.logger.warning(f"Document {document_id} failed with state: {state}")
-                    break
-                elif state == "ocr_completed":
-                    # OCR completed but LLM not done yet, continue polling
-                    workflow.logger.debug(f"Document {document_id} at ocr_completed (poll {poll_num + 1}/{max_polls}), waiting for llm_completed...")
-                elif state in ["llm_processing", "ocr_processing", "uploaded"]:
-                    # Still processing, continue polling
-                    workflow.logger.debug(f"Document {document_id} still processing: {state} (poll {poll_num + 1}/{max_polls})")
-                else:
-                    workflow.logger.warning(f"Document {document_id} in unexpected state: {state}")
-                
-                # Sleep before next poll
+                    workflow.logger.warning(f"Document {document_id} for patient {patient_key} failed with state: {state}")
+                    document_status_map[patient_key] = state
+                # For other states (processing, ocr_completed, etc.), continue polling
+            
+            # Sleep before next poll if there are still pending documents
+            if pending_documents and poll_num < max_polls - 1:
                 await workflow.sleep(timedelta(seconds=poll_interval_seconds))
+        
+        # Mark any remaining documents that didn't complete as timeout
+        for patient_key in patient_document_map:
+            if patient_key not in document_status_map:
+                workflow.logger.warning(f"Document for patient {patient_key} did not reach a final state within timeout")
+                document_status_map[patient_key] = "timeout"
+        
+        workflow.logger.info(f"Step 3c: Retrieving insurance card results for completed documents...")
+        # Step 5: Retrieve insurance card results only for successfully completed documents
+        for patient_key, document_id in patient_document_map.items():
+            patient_data = patients[patient_key]
+            state = document_status_map.get(patient_key, "")
             
-            if not reached_llm_completed:
-                workflow.logger.warning(f"Document {document_id} did not reach llm_completed state after {max_polls} polls")
-                # Continue without insurance card data for this patient
-                patients_with_insurance[patient_key] = patient_data
-                continue
-            
-            # Retrieve the insurance_card result
-            workflow.logger.info(f"Retrieving insurance card result for document {document_id}...")
-            insurance_result = await workflow.execute_activity(
-                "get_classification_result_activity",
-                args=(organization_id, document_id, insurance_prompt_revid, None),
-                start_to_close_timeout=timedelta(seconds=30),
-            )
-            
-            # Add insurance card data to patient data (only save llm_result contents)
-            patient_data_with_insurance = patient_data.copy()
-            if insurance_result and isinstance(insurance_result, dict):
-                patient_data_with_insurance["patient_insurance_card"] = insurance_result.get("llm_result", insurance_result)
+            if state == "llm_completed":
+                # Retrieve the insurance_card result
+                workflow.logger.info(f"Retrieving insurance card result for document {document_id} (patient {patient_key})...")
+                insurance_result = await workflow.execute_activity(
+                    "get_classification_result_activity",
+                    args=(organization_id, document_id, insurance_prompt_revid, None),
+                    start_to_close_timeout=timedelta(seconds=30),
+                )
+                
+                # Add insurance card data to patient data (only save llm_result contents)
+                patient_data_with_insurance = patient_data.copy()
+                if insurance_result and isinstance(insurance_result, dict):
+                    patient_data_with_insurance["patient_insurance_card"] = insurance_result.get("llm_result", insurance_result)
+                else:
+                    patient_data_with_insurance["patient_insurance_card"] = {}
+                
+                patients_with_insurance[patient_key] = patient_data_with_insurance
+                workflow.logger.info(f"Completed processing patient {patient_key}")
             else:
-                patient_data_with_insurance["patient_insurance_card"] = {}
-            
-            patients_with_insurance[patient_key] = patient_data_with_insurance
-            workflow.logger.info(f"Completed processing patient {patient_key}")
+                # Document failed or didn't complete, add patient without insurance card
+                workflow.logger.warning(f"Document {document_id} for patient {patient_key} did not complete successfully (state: {state})")
+                patients_with_insurance[patient_key] = patient_data
+        
+        # Add patients that were skipped (no pages) to the final result
+        for patient_key, patient_data in patients.items():
+            if patient_key not in patients_with_insurance:
+                patients_with_insurance[patient_key] = patient_data
         
         # Return results with insurance card data
         result = {

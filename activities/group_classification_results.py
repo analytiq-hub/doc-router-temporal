@@ -23,12 +23,12 @@ async def group_classification_results_activity(
     Returns:
         Dictionary containing:
         - surgery_schedule: List of page numbers with surgery schedule
-        - patients: Dictionary mapping first_last_dob to list of page numbers
+        - patients: Dictionary mapping first_last_dob to dict with "pages" key containing list of page numbers
     """
     logger.info("Grouping classification results by surgery schedule and patients")
     
     surgery_schedule_pages = []
-    patients = {}  # Maps patient_key -> list of page numbers
+    patients = {}  # Maps patient_key -> {"pages": [page_numbers]}
     pages_without_dob = []  # List of (page_num, first_name, last_name) tuples
     
     # Extract pages from results
@@ -140,8 +140,8 @@ async def group_classification_results_activity(
                     # Page has DOB - add directly to patients dict
                     patient_key = "_".join(patient_key_parts)
                     if patient_key not in patients:
-                        patients[patient_key] = []
-                    patients[patient_key].append(page_num)
+                        patients[patient_key] = {"pages": []}
+                    patients[patient_key]["pages"].append(page_num)
                     logger.debug(f"Page {page_num} assigned to patient with DOB: {patient_key}")
                 else:
                     # Page without DOB - store for later matching
@@ -158,7 +158,7 @@ async def group_classification_results_activity(
         matched = False
         
         # Try to find a matching patient with DOB
-        for patient_key, page_list in patients.items():
+        for patient_key, patient_data in patients.items():
             # Extract name parts from patient_key (format: first_last_dob)
             key_parts = patient_key.split("_")
             # Last part is DOB, everything before is name
@@ -170,19 +170,19 @@ async def group_classification_results_activity(
                 if first_name and key_first and first_name == key_first:
                     if last_name and key_last and last_name == key_last:
                         # Found a match - add page to this patient group
-                        page_list.append(page_num)
+                        patient_data["pages"].append(page_num)
                         matched = True
                         logger.debug(f"Page {page_num} matched to patient {patient_key} by name")
                         break
                     elif not last_name and not key_last:
                         # Both missing last name, match on first name only
-                        page_list.append(page_num)
+                        patient_data["pages"].append(page_num)
                         matched = True
                         logger.debug(f"Page {page_num} matched to patient {patient_key} by first name only")
                         break
                 elif not first_name and not key_first and last_name and key_last and last_name == key_last:
                     # Match on last name only
-                    page_list.append(page_num)
+                    patient_data["pages"].append(page_num)
                     matched = True
                     logger.debug(f"Page {page_num} matched to patient {patient_key} by last name only")
                     break
@@ -197,14 +197,14 @@ async def group_classification_results_activity(
             if patient_key_parts:
                 patient_key = "_".join(patient_key_parts)
                 if patient_key not in patients:
-                    patients[patient_key] = []
-                patients[patient_key].append(page_num)
+                    patients[patient_key] = {"pages": []}
+                patients[patient_key]["pages"].append(page_num)
                 logger.debug(f"Page {page_num} assigned to new patient without DOB: {patient_key}")
     
     # Sort page numbers in all lists
     surgery_schedule_pages.sort()
     for patient_key in patients:
-        patients[patient_key].sort()
+        patients[patient_key]["pages"].sort()
     
     result = {
         "surgery_schedule": surgery_schedule_pages,

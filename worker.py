@@ -14,6 +14,7 @@ load_dotenv()
 from workflows.list_documents import ListDocumentsWorkflow, ListDocumentsWorkflowAlias
 from workflows.classify_pdf_pages import ClassifyPDFPagesWorkflow, ClassifyPDFPagesWorkflowAlias
 from workflows.classify_and_group_pdf_pages import ClassifyAndGroupPDFPagesWorkflow, ClassifyAndGroupPDFPagesWorkflowAlias
+from workflows.classify_group_and_extract_insurance import ClassifyGroupAndExtractInsuranceWorkflow, ClassifyGroupAndExtractInsuranceWorkflowAlias
 from activities.list_documents import list_documents_activity
 from activities.chunk_and_upload_pdf import chunk_and_upload_pdf_activity
 from activities.get_tag_id import get_tag_id_activity
@@ -24,6 +25,7 @@ from activities.get_document_status import get_document_status_activity
 from activities.retry_failed_document import retry_failed_document_activity
 from activities.get_classification_result import get_classification_result_activity
 from activities.group_classification_results import group_classification_results_activity
+from activities.create_and_upload_patient_pdf import create_and_upload_patient_pdf_activity
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +68,8 @@ async def main():
             ClassifyPDFPagesWorkflowAlias,
             ClassifyAndGroupPDFPagesWorkflow,
             ClassifyAndGroupPDFPagesWorkflowAlias,
+            ClassifyGroupAndExtractInsuranceWorkflow,
+            ClassifyGroupAndExtractInsuranceWorkflowAlias,
         ],
         activities=[
             list_documents_activity,
@@ -78,6 +82,7 @@ async def main():
             retry_failed_document_activity,
             get_classification_result_activity,
             group_classification_results_activity,
+            create_and_upload_patient_pdf_activity,
         ],
         workflow_runner=SandboxedWorkflowRunner(restrictions=sandbox_restrictions),
     )

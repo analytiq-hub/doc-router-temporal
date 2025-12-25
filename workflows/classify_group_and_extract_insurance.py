@@ -162,9 +162,12 @@ class ClassifyGroupAndExtractInsuranceWorkflow:
                 start_to_close_timeout=timedelta(seconds=30),
             )
             
-            # Add insurance card data to patient data
+            # Add insurance card data to patient data (only save llm_result contents)
             patient_data_with_insurance = patient_data.copy()
-            patient_data_with_insurance["patient_insurance_card"] = insurance_result
+            if insurance_result and isinstance(insurance_result, dict):
+                patient_data_with_insurance["patient_insurance_card"] = insurance_result.get("llm_result", insurance_result)
+            else:
+                patient_data_with_insurance["patient_insurance_card"] = {}
             
             patients_with_insurance[patient_key] = patient_data_with_insurance
             workflow.logger.info(f"Completed processing patient {patient_key}")

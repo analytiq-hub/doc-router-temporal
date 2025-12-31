@@ -278,14 +278,14 @@ async def group_classification_results_activity(
                 patient_metadata[patient_key]["mrn"].add(mrn)
             logger.debug(f"Page {page_num} assigned to new patient: {patient_key}")
     
-    # Third pass: Fuzzy matching - merge standalone patients with similar names (up to 2 letter difference)
+    # Third pass: Fuzzy matching - merge standalone patients with similar names
     def levenshtein_distance(s1, s2):
         """Calculate Levenshtein distance between two strings."""
         if len(s1) < len(s2):
             return levenshtein_distance(s2, s1)
         if len(s2) == 0:
             return len(s1)
-        
+
         previous_row = list(range(len(s2) + 1))
         for i, c1 in enumerate(s1):
             current_row = [i + 1]
@@ -296,55 +296,103 @@ async def group_classification_results_activity(
                 current_row.append(min(insertions, deletions, substitutions))
             previous_row = current_row
         return previous_row[-1]
-    
-    def extract_name_string(patient_key):
-        """Extract name portion from patient key (format: first_last or first_last_dob).
-        Returns the name part without DOB as a single string.
-        DOB format is YYYY_MM_DD, so:
-        - first_last_YYYY_MM_DD (5 parts) -> name is first 2 parts
-        - first_YYYY_MM_DD (4 parts) -> name is first 1 part
-        - first_last (2 parts) -> name is all parts
-        - first (1 part) -> name is all parts"""
+
+    def extract_name_parts(patient_key):
+        """Extract first and last name from patient key.
+        Returns (first_name, last_name) tuple.
+        Handles formats: first_last, first_last_dob, first_dob, etc."""
         parts = patient_key.split("_")
+
         # Check if last 3 parts look like a date (YYYY, MM, DD - all numeric)
         if len(parts) >= 4:
             last_three = parts[-3:]
             if all(part.isdigit() for part in last_three) and len(last_three[0]) == 4:  # YYYY format
-                # Has DOB - return name parts (everything except last 3)
-                return "_".join(parts[:-3])
-        # No DOB - return all parts as name
-        return "_".join(parts)
-    
+                # Has DOB - name parts are everything except last 3
+                name_parts = parts[:-3]
+                if len(name_parts) >= 2:
+                    return name_parts[0], name_parts[1]
+                elif len(name_parts) == 1:
+                    return name_parts[0], ""
+        # No DOB - check if we have first_last format
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+        elif len(parts) == 1:
+            return parts[0], ""
+
+        return "", ""
+
+    def names_are_similar(name1, name2):
+        """Check if two names are similar, handling abbreviations and common variations."""
+        if not name1 or not name2:
+            return False
+
+        name1_lower = name1.lower()
+        name2_lower = name2.lower()
+
+        # Exact match
+        if name1_lower == name2_lower:
+            return True
+
+        # Handle single letter abbreviations (S -> Suzanne, J -> Joseph, etc.)
+        if len(name1_lower) == 1 and name2_lower.startswith(name1_lower):
+            return True
+        if len(name2_lower) == 1 and name1_lower.startswith(name2_lower):
+            return True
+
+        # Handle common name variations with small Levenshtein distance
+        distance = levenshtein_distance(name1_lower, name2_lower)
+        max_allowed_distance = min(2, max(len(name1_lower), len(name2_lower)) // 3)  # More tolerant for longer names
+        return distance <= max_allowed_distance
+
     logger.info("Third pass: Fuzzy matching standalone patients with similar names...")
     patients_to_remove = []
-    
+
     # Find standalone patients (only 1 page) and compare with others
     for standalone_key, standalone_data in patients.items():
         if len(standalone_data["pages"]) != 1:
             continue  # Only process standalone patients
-        
-        standalone_name = extract_name_string(standalone_key).lower()
+
+        standalone_first, standalone_last = extract_name_parts(standalone_key)
         best_match = None
-        best_distance = float('inf')
-        
+        best_score = 0  # Higher score = better match
+
         # Compare with all other patients
         for other_key, other_data in patients.items():
             if other_key == standalone_key:
                 continue
-            
-            other_name = extract_name_string(other_key).lower()
-            
-            # Calculate Levenshtein distance between the full name strings (case-insensitive)
-            distance = levenshtein_distance(standalone_name, other_name)
-            
-            # Only consider if distance <= 2
-            if distance <= 2 and distance < best_distance:
-                best_distance = distance
+
+            other_first, other_last = extract_name_parts(other_key)
+
+            # Calculate matching score based on name components
+            score = 0
+
+            # Last name match is most important (weight: 3)
+            if standalone_last and other_last:
+                if standalone_last.lower() == other_last.lower():
+                    score += 3  # Exact last name match
+                elif names_are_similar(standalone_last, other_last):
+                    score += 2  # Similar last name
+                else:
+                    continue  # Different last names - skip this match
+
+            # First name match (weight: 1-2)
+            if standalone_first and other_first:
+                if names_are_similar(standalone_first, other_first):
+                    score += 2  # Similar first names
+                elif standalone_first.lower() == other_first.lower():
+                    score += 2  # Exact first name match
+
+            # If we have a reasonable score, consider it a match
+            if score >= 3 and score > best_score:  # Require at least last name + some first name similarity
+                best_score = score
                 best_match = other_key
-        
+
         # If we found a match, merge the standalone patient into the matched patient
         if best_match:
-            logger.info(f"Merging standalone patient '{standalone_key}' (name: '{standalone_name}', distance: {best_distance}) into '{best_match}' (name: '{extract_name_string(best_match)}')")
+            standalone_name = f"{standalone_first}_{standalone_last}".strip("_")
+            other_first, other_last = extract_name_parts(best_match)
+            other_name = f"{other_first}_{other_last}".strip("_")
+            logger.info(f"Merging standalone patient '{standalone_key}' (name: '{standalone_name}', score: {best_score}) into '{best_match}' (name: '{other_name}')")
             patients[best_match]["pages"].extend(standalone_data["pages"])
             patients_to_remove.append(standalone_key)
     

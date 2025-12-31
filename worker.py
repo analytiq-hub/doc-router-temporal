@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def main():
     """Main function to start the Temporal worker."""
     # Get Temporal connection details from environment
-    temporal_host = os.getenv("TEMPORAL_HOST", "10.83.8.98")
+    temporal_host = os.getenv("TEMPORAL_HOST", "localhost")
     temporal_port = int(os.getenv("TEMPORAL_PORT", "7233"))
     temporal_namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     

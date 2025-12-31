@@ -1,14 +1,14 @@
 # Doc Router Temporal
 
-A Temporal workflow system for listing documents from docrouter via FastAPI.
+A Temporal workflow system for listing documents from DocRouter.AI via FastAPI.
 
 ## Overview
 
-This project provides a Temporal workflow that connects to the docrouter FastAPI service to list documents in a workspace (organization). It demonstrates how to integrate Temporal workflows with external FastAPI services.
+This project provides a Temporal workflow that connects to the DocRouter.AI FastAPI service to list documents in a workspace (organization). It demonstrates how to integrate Temporal workflows with external FastAPI services.
 
 ## Features
 
-- Temporal workflow for listing documents from docrouter
+- Temporal workflow for listing documents from DocRouter.AI
 - Async activity that calls FastAPI endpoints
 - Configurable connection to Temporal server
 - Easy-to-use client script to trigger workflows
@@ -16,8 +16,8 @@ This project provides a Temporal workflow that connects to the docrouter FastAPI
 ## Prerequisites
 
 - Python 3.9+
-- Temporal server running at `10.83.8.98` (or configured via environment variables)
-- Access to docrouter FastAPI service
+- Temporal server running at `localhost` (or configured via environment variables)
+- Access to DocRouter.AI FastAPI service
 - API token for docrouter authentication
 
 ## Installation
@@ -39,10 +39,10 @@ cp .env.example .env
 ```
 
 Required environment variables:
-- `DOCROUTER_BASE_URL`: Base URL of the docrouter FastAPI service (e.g., `http://localhost:8000`)
+- `DOCROUTER_BASE_URL`: Base URL of the DocRouter.AI FastAPI service (e.g., `http://localhost:8000`)
 - `DOCROUTER_ORG_ID`: The organization/workspace ID to list documents from
 - `DOCROUTER_ORG_API_TOKEN`: API token for authentication
-- `TEMPORAL_HOST`: Temporal server host (default: `10.83.8.98`)
+- `TEMPORAL_HOST`: Temporal server host (default: `localhost`)
 - `TEMPORAL_PORT`: Temporal server port (default: `7233`)
 - `TEMPORAL_NAMESPACE`: Temporal namespace (default: `default`)
 
@@ -108,7 +108,7 @@ doc-router-temporal/
 
 ### Temporal Server
 
-The default configuration connects to Temporal at `temporal_server_ip:7233` with the `default` namespace. You can override these via environment variables.
+The default configuration connects to Temporal at `localhost:7233` with the `default` namespace. You can override these via environment variables.
 
 ### DocRouter API
 

@@ -355,6 +355,120 @@ async def group_classification_results_activity(
     
     logger.info(f"Fuzzy matching completed: merged {len(patients_to_remove)} standalone patients")
     
+    # Fourth pass: Merge standalone insurance/ID cards with adjacent or overlapping patient groups
+    logger.info("Fourth pass: Merging standalone insurance/ID cards with adjacent patient groups...")
+    
+    # Create a map of page_num -> page_data for quick lookup
+    page_data_map = {page_data.get("page_num"): page_data for page_data in pages}
+    
+    # Helper function to get document type from a page
+    def get_document_type(page_num):
+        page_data = page_data_map.get(page_num)
+        if not page_data:
+            return None
+        classification_data = page_data.get(prompt_name, {})
+        if isinstance(classification_data, dict):
+            return classification_data.get("document_type", "").lower()
+        return None
+    
+    # Helper function to check if a patient group already has an insurance card or ID card
+    def has_insurance_or_id_card(patient_pages):
+        for page_num in patient_pages:
+            doc_type = get_document_type(page_num)
+            if doc_type in ["patient_insurance_card", "patient_id_card"]:
+                return True
+        return False
+    
+    # Helper function to extract last name from patient key
+    def extract_last_name(patient_key):
+        """Extract last name from patient key (format: first_last or first_last_dob)."""
+        parts = patient_key.split("_")
+        # Check if last 3 parts look like a date (YYYY, MM, DD - all numeric)
+        if len(parts) >= 4:
+            last_three = parts[-3:]
+            if all(part.isdigit() for part in last_three) and len(last_three[0]) == 4:  # YYYY format
+                # Has DOB - last name is second to last part (before DOB)
+                if len(parts) >= 5:
+                    return parts[1].lower()  # second part is last name
+                elif len(parts) == 4:
+                    return ""  # Only first name and DOB, no last name
+        # No DOB - check if we have at least 2 parts (first_last)
+        if len(parts) >= 2:
+            return parts[1].lower()  # second part is last name
+        return ""  # Only first name or no name
+    
+    # Find standalone pages that are insurance cards or ID cards
+    standalone_cards = []
+    for patient_key, patient_data in patients.items():
+        if len(patient_data["pages"]) == 1:
+            page_num = patient_data["pages"][0]
+            doc_type = get_document_type(page_num)
+            if doc_type in ["patient_insurance_card", "patient_id_card"]:
+                standalone_cards.append((patient_key, page_num, doc_type))
+    
+    logger.info(f"Found {len(standalone_cards)} standalone insurance/ID card pages to evaluate")
+    
+    # Try to merge each standalone card
+    cards_to_remove = []
+    for standalone_key, card_page_num, card_doc_type in standalone_cards:
+        best_match = None
+        best_match_reason = None
+        match_priority = 0  # Higher priority = better match (3=middle, 2=adjacent, 1=last name)
+        
+        # Find the last name of the standalone card
+        card_last_name = extract_last_name(standalone_key)
+        
+        # Look through all other patient groups
+        for other_key, other_data in patients.items():
+            if other_key == standalone_key:
+                continue
+            
+            other_pages = other_data["pages"]
+            
+            # Skip if the other group already has an insurance card or ID card
+            if has_insurance_or_id_card(other_pages):
+                continue
+            
+            min_page = min(other_pages)
+            max_page = max(other_pages)
+            
+            # Priority 3: Check if page is in the middle of the other group - highest priority, merge immediately
+            if min_page < card_page_num < max_page:
+                best_match = other_key
+                best_match_reason = f"page {card_page_num} is in the middle of group {other_key} (pages {min_page}-{max_page})"
+                match_priority = 3
+                break  # Middle match is definitive, no need to check further
+            
+            # Priority 2: Check if page is adjacent to the other group
+            if card_page_num == min_page - 1 or card_page_num == max_page + 1:
+                if match_priority < 2:
+                    best_match = other_key
+                    best_match_reason = f"page {card_page_num} is adjacent to group {other_key} (pages {min_page}-{max_page})"
+                    match_priority = 2
+            
+            # Priority 1: Check if last name matches
+            other_last_name = extract_last_name(other_key)
+            if card_last_name and other_last_name and card_last_name == other_last_name:
+                if match_priority < 1:
+                    best_match = other_key
+                    best_match_reason = f"last name '{card_last_name}' matches group {other_key}"
+                    match_priority = 1
+        
+        # Merge if we found a match
+        if best_match:
+            logger.info(f"Merging standalone {card_doc_type} '{standalone_key}' (page {card_page_num}) into '{best_match}': {best_match_reason}")
+            patients[best_match]["pages"].append(card_page_num)
+            cards_to_remove.append(standalone_key)
+        else:
+            logger.debug(f"Keeping standalone {card_doc_type} '{standalone_key}' (page {card_page_num}) separate - no matching group found")
+    
+    # Remove merged cards
+    for key_to_remove in cards_to_remove:
+        del patients[key_to_remove]
+        logger.debug(f"Removed merged standalone card: {key_to_remove}")
+    
+    logger.info(f"Insurance/ID card merging completed: merged {len(cards_to_remove)} standalone cards")
+    
     # Sort page numbers in all lists
     surgery_schedule_pages.sort()
     for patient_key in patients:

@@ -108,7 +108,7 @@ doc-router-temporal/
 
 ### Temporal Server
 
-The default configuration connects to Temporal at `10.83.8.98:7233` with the `default` namespace. You can override these via environment variables.
+The default configuration connects to Temporal at `temporal_server_ip:7233` with the `default` namespace. You can override these via environment variables.
 
 ### DocRouter API
 
@@ -135,4 +135,4 @@ To test the workflow:
 
 ## License
 
-[Add your license here]
+MIT

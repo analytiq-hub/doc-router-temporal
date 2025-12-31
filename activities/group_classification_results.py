@@ -86,9 +86,11 @@ async def group_classification_results_activity(
         
         # If we found patient information, normalize
         if first_name or last_name or dob or mrn:
-            # Normalize names (lowercase, strip whitespace)
+            # Normalize names (lowercase, strip whitespace, normalize compound names)
             first_name_normalized = str(first_name).strip().lower() if first_name else ""
             last_name_normalized = str(last_name).strip().lower() if last_name else ""
+            # Normalize compound last names by replacing spaces with underscores for consistent keys
+            last_name_normalized = last_name_normalized.replace(" ", "_")
             
             # Normalize MRN (strip whitespace, keep case for MRN as it may be alphanumeric)
             mrn_normalized = str(mrn).strip() if mrn else ""
@@ -132,12 +134,17 @@ async def group_classification_results_activity(
                     # Format as YYYY_MM_DD
                     dob_normalized = parsed_date.strftime("%Y_%m_%d")
             
-            # Create patient key: first_last_dob (lowercase, underscores)
+            # Create patient key: prefer compound last names as the primary identifier
             patient_key_parts = []
-            if first_name_normalized:
-                patient_key_parts.append(first_name_normalized)
-            if last_name_normalized:
+            if last_name_normalized and "_" in last_name_normalized:
+                # For compound last names (with underscores), use just last_name_dob format
                 patient_key_parts.append(last_name_normalized)
+            else:
+                # For regular names, use first_last_dob format
+                if first_name_normalized:
+                    patient_key_parts.append(first_name_normalized)
+                if last_name_normalized:
+                    patient_key_parts.append(last_name_normalized)
             if dob_normalized:
                 patient_key_parts.append(dob_normalized)
             
@@ -300,7 +307,7 @@ async def group_classification_results_activity(
     def extract_name_parts(patient_key):
         """Extract first and last name from patient key.
         Returns (first_name, last_name) tuple.
-        Handles formats: first_last, first_last_dob, first_dob, etc."""
+        Handles formats: first_last_dob, compound_last_dob, first_last, etc."""
         parts = patient_key.split("_")
 
         # Check if last 3 parts look like a date (YYYY, MM, DD - all numeric)
@@ -309,15 +316,24 @@ async def group_classification_results_activity(
             if all(part.isdigit() for part in last_three) and len(last_three[0]) == 4:  # YYYY format
                 # Has DOB - name parts are everything except last 3
                 name_parts = parts[:-3]
-                if len(name_parts) >= 2:
-                    return name_parts[0], name_parts[1]
-                elif len(name_parts) == 1:
-                    return name_parts[0], ""
-        # No DOB - check if we have first_last format
-        if len(parts) >= 2:
-            return parts[0], parts[1]
-        elif len(parts) == 1:
-            return parts[0], ""
+                if len(name_parts) == 1:
+                    # Single part name (compound last name like "cosgalla_contreras")
+                    return "", name_parts[0]
+                elif len(name_parts) >= 2:
+                    # First and last name format
+                    return name_parts[0], "_".join(name_parts[1:])  # Rejoin compound parts
+        # No DOB - check if we have compound_last or first_last format
+        if len(parts) == 1:
+            # Single compound name
+            return "", parts[0]
+        elif len(parts) >= 2:
+            # Check if first part looks like a first name (short) vs compound last name
+            if len(parts[0]) <= 3 and len(parts) > 2:
+                # Likely first_last format
+                return parts[0], "_".join(parts[1:])
+            else:
+                # Likely compound last name format
+                return "", "_".join(parts)
 
         return "", ""
 
@@ -339,6 +355,11 @@ async def group_classification_results_activity(
         if len(name2_lower) == 1 and name1_lower.startswith(name2_lower):
             return True
 
+        # Handle compound last names where one is a substring of the other
+        # (e.g., "Contreras" vs "Cosgalla Contreras", or "Smith" vs "Smith-Jones")
+        if name1_lower in name2_lower or name2_lower in name1_lower:
+            return True
+
         # Handle common name variations with small Levenshtein distance
         distance = levenshtein_distance(name1_lower, name2_lower)
         max_allowed_distance = min(2, max(len(name1_lower), len(name2_lower)) // 3)  # More tolerant for longer names
@@ -352,6 +373,7 @@ async def group_classification_results_activity(
         if len(standalone_data["pages"]) != 1:
             continue  # Only process standalone patients
 
+
         standalone_first, standalone_last = extract_name_parts(standalone_key)
         best_match = None
         best_score = 0  # Higher score = better match
@@ -360,6 +382,7 @@ async def group_classification_results_activity(
         for other_key, other_data in patients.items():
             if other_key == standalone_key:
                 continue
+
 
             other_first, other_last = extract_name_parts(other_key)
 
@@ -371,7 +394,12 @@ async def group_classification_results_activity(
                 if standalone_last.lower() == other_last.lower():
                     score += 3  # Exact last name match
                 elif names_are_similar(standalone_last, other_last):
-                    score += 2  # Similar last name
+                    # Check if it's a substring match (compound name case)
+                    if (standalone_last.lower() in other_last.lower() or
+                        other_last.lower() in standalone_last.lower()):
+                        score += 3  # Compound name substring match - treat as strong as exact
+                    else:
+                        score += 2  # Other similarity match
                 else:
                     continue  # Different last names - skip this match
 
@@ -383,6 +411,7 @@ async def group_classification_results_activity(
                     score += 2  # Exact first name match
 
             # If we have a reasonable score, consider it a match
+
             if score >= 3 and score > best_score:  # Require at least last name + some first name similarity
                 best_score = score
                 best_match = other_key

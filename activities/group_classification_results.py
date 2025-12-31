@@ -29,7 +29,8 @@ async def group_classification_results_activity(
     
     surgery_schedule_pages = []
     patients = {}  # Maps patient_key -> {"pages": [page_numbers]}
-    pages_without_dob = []  # List of (page_num, first_name, last_name) tuples
+    pages_without_dob = []  # List of (page_num, first_name, last_name, mrn, dob_normalized) tuples
+    patient_metadata = {}  # Maps patient_key -> {"mrn": set of MRNs, "dob": dob_normalized}
     
     # Extract pages from results
     pages = classification_results.get("pages", [])
@@ -59,7 +60,8 @@ async def group_classification_results_activity(
     field_mappings = {
         "first_name": ["firstname", "first_name", "first name", "fname", "patient first name"],
         "last_name": ["lastname", "last_name", "last name", "lname", "patient last name", "surname"],
-        "dob": ["date of birth", "dob", "birthdate", "birth date", "date_of_birth", "birth_date"]
+        "dob": ["date of birth", "dob", "birthdate", "birth date", "date_of_birth", "birth_date"],
+        "mrn": ["medical record number", "mrn", "medical_record_number", "patient medical record number", "record number", "record_number"]
     }
     
     # First pass: collect all pages and categorize them
@@ -80,12 +82,16 @@ async def group_classification_results_activity(
         first_name = find_field(classification_data, field_mappings["first_name"])
         last_name = find_field(classification_data, field_mappings["last_name"])
         dob = find_field(classification_data, field_mappings["dob"])
+        mrn = find_field(classification_data, field_mappings["mrn"])
         
         # If we found patient information, normalize
-        if first_name or last_name or dob:
+        if first_name or last_name or dob or mrn:
             # Normalize names (lowercase, strip whitespace)
             first_name_normalized = str(first_name).strip().lower() if first_name else ""
             last_name_normalized = str(last_name).strip().lower() if last_name else ""
+            
+            # Normalize MRN (strip whitespace, keep case for MRN as it may be alphanumeric)
+            mrn_normalized = str(mrn).strip() if mrn else ""
             
             # Normalize DOB
             dob_normalized = None
@@ -136,29 +142,39 @@ async def group_classification_results_activity(
                 patient_key_parts.append(dob_normalized)
             
             if patient_key_parts:
-                if dob_normalized:
-                    # Page has DOB - add directly to patients dict
+                if dob_normalized and (first_name_normalized or last_name_normalized):
+                    # Page has DOB AND name - add directly to patients dict
                     patient_key = "_".join(patient_key_parts)
                     if patient_key not in patients:
                         patients[patient_key] = {"pages": []}
+                        patient_metadata[patient_key] = {"mrn": set(), "dob": dob_normalized}
                     patients[patient_key]["pages"].append(page_num)
-                    logger.debug(f"Page {page_num} assigned to patient with DOB: {patient_key}")
+                    # Store MRN if present
+                    if mrn_normalized:
+                        patient_metadata[patient_key]["mrn"].add(mrn_normalized)
+                    logger.debug(f"Page {page_num} assigned to patient with DOB and name: {patient_key}")
                 else:
-                    # Page without DOB - store for later matching
-                    pages_without_dob.append((page_num, first_name_normalized, last_name_normalized))
-                    logger.debug(f"Page {page_num} stored for DOB matching: {first_name_normalized} {last_name_normalized}")
+                    # Page without DOB, or has DOB but no name - store for later matching
+                    pages_without_dob.append((page_num, first_name_normalized, last_name_normalized, mrn_normalized, dob_normalized))
+                    logger.debug(f"Page {page_num} stored for matching: {first_name_normalized} {last_name_normalized} MRN:{mrn_normalized} DOB:{dob_normalized}")
+            elif mrn_normalized or dob_normalized:
+                # Page has only MRN or DOB (no name) - store for later matching
+                pages_without_dob.append((page_num, first_name_normalized, last_name_normalized, mrn_normalized, dob_normalized))
+                logger.debug(f"Page {page_num} stored for MRN/DOB matching: MRN:{mrn_normalized} DOB:{dob_normalized}")
         else:
             # If no patient info found, check if it might be a surgery schedule page
             classification_str = str(classification_data).lower()
             if any(keyword in classification_str for keyword in ["schedule", "surgery", "operating"]):
                 surgery_schedule_pages.append(page_num)
     
-    # Second pass: match pages without DOB to pages with DOB based on name
-    for page_num, first_name, last_name in pages_without_dob:
+    # Second pass: match pages without DOB to pages with DOB based on name, MRN, or DOB
+    for page_num, first_name, last_name, mrn, dob in pages_without_dob:
         matched = False
         
-        # Try to find a matching patient with DOB
+        # Try to find a matching patient - first by name, then by MRN, then by DOB
         for patient_key, patient_data in patients.items():
+            metadata = patient_metadata.get(patient_key, {"mrn": set(), "dob": None})
+            
             # Extract name parts from patient_key (format: first_last_dob)
             key_parts = patient_key.split("_")
             # Last part is DOB, everything before is name
@@ -169,37 +185,98 @@ async def group_classification_results_activity(
                 # Match if names match (case-insensitive, already normalized)
                 if first_name and key_first and first_name == key_first:
                     if last_name and key_last and last_name == key_last:
-                        # Found a match - add page to this patient group
+                        # Found a match by name - add page to this patient group
                         patient_data["pages"].append(page_num)
+                        # Update metadata with MRN and DOB if present
+                        if mrn:
+                            metadata["mrn"].add(mrn)
+                        if dob and not metadata["dob"]:
+                            metadata["dob"] = dob
                         matched = True
                         logger.debug(f"Page {page_num} matched to patient {patient_key} by name")
                         break
                     elif not last_name and not key_last:
                         # Both missing last name, match on first name only
                         patient_data["pages"].append(page_num)
+                        if mrn:
+                            metadata["mrn"].add(mrn)
+                        if dob and not metadata["dob"]:
+                            metadata["dob"] = dob
                         matched = True
                         logger.debug(f"Page {page_num} matched to patient {patient_key} by first name only")
                         break
                 elif not first_name and not key_first and last_name and key_last and last_name == key_last:
                     # Match on last name only
                     patient_data["pages"].append(page_num)
+                    if mrn:
+                        metadata["mrn"].add(mrn)
+                    if dob and not metadata["dob"]:
+                        metadata["dob"] = dob
                     matched = True
                     logger.debug(f"Page {page_num} matched to patient {patient_key} by last name only")
                     break
         
-        # If no match found, create a new patient entry without DOB
+        # If no name match found, try matching by MRN
+        if not matched and mrn:
+            for patient_key, patient_data in patients.items():
+                metadata = patient_metadata.get(patient_key, {"mrn": set(), "dob": None})
+                if mrn in metadata["mrn"]:
+                    # Found a match by MRN - add page to this patient group
+                    patient_data["pages"].append(page_num)
+                    # Update name and DOB if present
+                    if first_name or last_name:
+                        # Update metadata (names are already in the key, but we can track them)
+                        pass
+                    if dob and not metadata["dob"]:
+                        metadata["dob"] = dob
+                    matched = True
+                    logger.debug(f"Page {page_num} matched to patient {patient_key} by MRN: {mrn}")
+                    break
+        
+        # If still no match found, try matching by DOB alone
+        if not matched and dob:
+            for patient_key, patient_data in patients.items():
+                metadata = patient_metadata.get(patient_key, {"mrn": set(), "dob": None})
+                if metadata["dob"] and metadata["dob"] == dob:
+                    # Found a match by DOB - add page to this patient group
+                    patient_data["pages"].append(page_num)
+                    # Update MRN if present
+                    if mrn:
+                        metadata["mrn"].add(mrn)
+                    matched = True
+                    logger.debug(f"Page {page_num} matched to patient {patient_key} by DOB: {dob}")
+                    break
+        
+        # If no match found, create a new patient entry
         if not matched:
             patient_key_parts = []
             if first_name:
                 patient_key_parts.append(first_name)
             if last_name:
                 patient_key_parts.append(last_name)
+            
+            # If we have a name, use it as the key
             if patient_key_parts:
                 patient_key = "_".join(patient_key_parts)
-                if patient_key not in patients:
-                    patients[patient_key] = {"pages": []}
-                patients[patient_key]["pages"].append(page_num)
-                logger.debug(f"Page {page_num} assigned to new patient without DOB: {patient_key}")
+            elif mrn:
+                # No name but have MRN - use MRN as identifier
+                patient_key = f"mrn_{mrn}"
+            elif dob:
+                # No name or MRN but have DOB - use DOB as identifier
+                patient_key = f"dob_{dob}"
+            else:
+                # No identifying information - skip this page
+                logger.warning(f"Page {page_num} has no identifiable patient information (name, MRN, or DOB), skipping")
+                continue
+            
+            if patient_key not in patients:
+                patients[patient_key] = {"pages": []}
+                patient_metadata[patient_key] = {"mrn": set(), "dob": dob if dob else None}
+            patients[patient_key]["pages"].append(page_num)
+            # Store MRN if present
+            if mrn:
+                patient_metadata[patient_key]["mrn"].add(mrn)
+            logger.debug(f"Page {page_num} assigned to new patient: {patient_key}")
     
     # Third pass: Fuzzy matching - merge standalone patients with similar names (up to 2 letter difference)
     def levenshtein_distance(s1, s2):
